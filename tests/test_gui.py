@@ -1,0 +1,62 @@
+"""Offscreen smoke test of the main window."""
+import os
+
+import pytest
+
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from projectplanner.compat import unhide_qt_plugins  # noqa: E402
+
+unhide_qt_plugins()
+
+from PyQt6.QtCore import QCoreApplication, QSettings  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+
+from projectplanner.main_window import MainWindow  # noqa: E402
+
+
+@pytest.fixture(scope="module")
+def app(tmp_path_factory):
+    QCoreApplication.setOrganizationName("ProjectPlannerTests")
+    QCoreApplication.setApplicationName("ProjectPlannerTests")
+    QSettings.setPath(QSettings.Format.NativeFormat, QSettings.Scope.UserScope,
+                      str(tmp_path_factory.mktemp("settings")))
+    return QApplication.instance() or QApplication([])
+
+
+def test_create_edit_delete(app, tmp_path, monkeypatch):
+    monkeypatch.setattr(QMessageBox, "question", lambda *a, **k: QMessageBox.StandardButton.Yes)
+    w = MainWindow(tmp_path / "p.pplan")
+
+    w.new_activity()
+    first = w.editor.activity_id
+    w.editor.title.setText("Design")
+    w.editor.title.textEdited.emit("Design")
+    w.editor.effort.setValue(8)
+    w.editor.scope.edit.setHtml("<p><b>Bold</b> scope</p>")
+    assert w.editor.is_dirty()
+    assert w.save_current_activity()
+
+    w.new_activity()
+    second = w.editor.activity_id
+    w.editor.depends.setText(str(first))
+    w.editor.depends.textEdited.emit(str(first))
+    w.editor.effort.setValue(4)
+    assert w.save_current_activity()
+
+    assert w.proxy.rowCount() == 2
+    total_col = w.model.COLUMNS.index("Total Effort (h)")
+    row = [a.id for a in w.model.activities].index(second)
+    assert w.model.index(row, total_col).data() == "4.0"  # own hours only
+    assert "font-weight" in w.store.get(first).description_html
+    assert w.store.get(first).description_text == "Bold scope"
+
+    # Selecting a row shows its details.
+    w._select_id(first)
+    assert w.editor.title.text() == "Design"
+    assert str(second) in w.editor.required_by.text()
+
+    w.delete_activity(first)
+    assert w.store.get(first) is None
+    assert w.store.get(second).depends_on == []
+    w.close()

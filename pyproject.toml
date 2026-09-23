@@ -1,0 +1,24 @@
+[project]
+name = "projectplanner"
+version = "0.1.0"
+description = "Desktop project planner: activities with rich-text scope, effort and dependencies"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "openpyxl>=3.1.5",
+    "pyqt6>=6.11.0",
+]
+
+[tool.uv]
+# Run from source (`uv run python -m projectplanner`) instead of an editable
+# install: uv hides the editable .pth file on this Mac, so it never loads.
+package = false
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+]

@@ -14,8 +14,9 @@ from pathlib import Path
 
 # Stamped into the SQLite header so we can tell our files from other databases.
 APPLICATION_ID = 0x50504C4E  # "PPLN"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 3
 FILE_SUFFIX = ".pplan"
+HOURS_PER_WEEK = 40
 
 STATUSES = ("Not started", "In progress", "Done", "On hold")
 
@@ -29,9 +30,10 @@ CREATE TABLE IF NOT EXISTS activities (
     title            TEXT    NOT NULL DEFAULT '',
     description_html TEXT    NOT NULL DEFAULT '',
     description_text TEXT    NOT NULL DEFAULT '',
-    effort_hours     REAL    NOT NULL DEFAULT 0,
+    duration_weeks   REAL    NOT NULL DEFAULT 0,
     status           TEXT    NOT NULL DEFAULT 'Not started',
     owner            TEXT    NOT NULL DEFAULT '',
+    group_name       TEXT    NOT NULL DEFAULT '',
     created_at       TEXT    NOT NULL,
     updated_at       TEXT    NOT NULL
 );
@@ -59,9 +61,10 @@ class Activity:
     title: str = ""
     description_html: str = ""
     description_text: str = ""
-    effort_hours: float = 0.0
+    duration_weeks: float = 0.0
     status: str = STATUSES[0]
     owner: str = ""
+    group_name: str = ""
     depends_on: list[int] = field(default_factory=list)
     created_at: str = ""
     updated_at: str = ""
@@ -141,9 +144,26 @@ class ProjectStore:
     def _init_schema(self) -> None:
         with self.conn:
             self.conn.executescript(_SCHEMA)
+            columns = {row["name"] for row in self.conn.execute("PRAGMA table_info(activities)")}
+            if "group_name" not in columns:
+                self.conn.execute(
+                    "ALTER TABLE activities ADD COLUMN group_name TEXT NOT NULL DEFAULT ''"
+                )
+            if "duration_weeks" not in columns:
+                self.conn.execute(
+                    "ALTER TABLE activities ADD COLUMN duration_weeks REAL NOT NULL DEFAULT 0"
+                )
+                if "effort_hours" in columns:
+                    self.conn.execute(
+                        "UPDATE activities SET duration_weeks = effort_hours / ?",
+                        (HOURS_PER_WEEK,),
+                    )
+            if "effort_hours" in columns:
+                self.conn.execute("ALTER TABLE activities DROP COLUMN effort_hours")
             self.conn.execute(f"PRAGMA application_id = {APPLICATION_ID}")
             self.conn.execute(
-                "INSERT OR IGNORE INTO meta(key, value) VALUES ('schema_version', ?)",
+                "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (str(SCHEMA_VERSION),),
             )
 
@@ -175,9 +195,10 @@ class ProjectStore:
             title=row["title"],
             description_html=row["description_html"],
             description_text=row["description_text"],
-            effort_hours=row["effort_hours"],
+            duration_weeks=row["duration_weeks"],
             status=row["status"],
             owner=row["owner"],
+            group_name=row["group_name"],
             depends_on=deps,
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -255,15 +276,16 @@ class ProjectStore:
         with self.conn:
             cur = self.conn.execute(
                 "INSERT INTO activities (title, description_html, description_text, "
-                "effort_hours, status, owner, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "duration_weeks, status, owner, group_name, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     activity.title,
                     activity.description_html,
                     activity.description_text,
-                    activity.effort_hours,
+                    activity.duration_weeks,
                     activity.status,
                     activity.owner,
+                    activity.group_name,
                     now,
                     now,
                 ),
@@ -282,15 +304,16 @@ class ProjectStore:
         with self.conn:
             self.conn.execute(
                 "UPDATE activities SET title = ?, description_html = ?, "
-                "description_text = ?, effort_hours = ?, status = ?, owner = ?, "
+                "description_text = ?, duration_weeks = ?, status = ?, owner = ?, group_name = ?, "
                 "updated_at = ? WHERE id = ?",
                 (
                     activity.title,
                     activity.description_html,
                     activity.description_text,
-                    activity.effort_hours,
+                    activity.duration_weeks,
                     activity.status,
                     activity.owner,
+                    activity.group_name,
                     _now(),
                     activity.id,
                 ),

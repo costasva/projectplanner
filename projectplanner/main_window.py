@@ -15,15 +15,20 @@ from PyQt6.QtCore import (
 from PyQt6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFileDialog,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
     QMainWindow,
     QMenu,
     QMessageBox,
+    QPushButton,
     QSplitter,
     QTableView,
+    QTableWidget,
+    QTableWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -46,8 +51,8 @@ ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class ActivityTableModel(QAbstractTableModel):
-    COLUMNS = ["ID", "Title", "Depends On", "Total Effort (h)", "Status"]
-    NUMERIC = {0, 3}
+    COLUMNS = ["ID", "Group", "Title", "Depends On", "Duration (weeks)", "Status"]
+    NUMERIC = {0, 4}
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -76,16 +81,17 @@ class ActivityTableModel(QAbstractTableModel):
         col = index.column()
         values = [
             a.id,
+            a.group_name,
             a.title,
             format_dependency_ids(a.depends_on),
-            a.effort_hours,
+            a.duration_weeks,
             a.status,
         ]
         if role == Qt.ItemDataRole.DisplayRole:
             v = values[col]
-            if col == 3:
-                return f"{v:,.1f}"
-            if col == 1 and not v:
+            if col == 4:
+                return f"{v:,.0f}"
+            if col == 2 and not v:
                 return "(untitled)"
             return str(v)
         if role == SORT_ROLE:
@@ -95,10 +101,10 @@ class ActivityTableModel(QAbstractTableModel):
             return a.id
         if role == Qt.ItemDataRole.TextAlignmentRole and col in self.NUMERIC:
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
-        if role == Qt.ItemDataRole.ToolTipRole and col == 1:
+        if role == Qt.ItemDataRole.ToolTipRole and col == 2:
             text = a.description_text.strip()
             return text[:400] + ("…" if len(text) > 400 else "") if text else None
-        if role == Qt.ItemDataRole.ForegroundRole and col == 1 and not a.title:
+        if role == Qt.ItemDataRole.ForegroundRole and col == 2 and not a.title:
             return Qt.GlobalColor.gray
         return None
 
@@ -130,12 +136,17 @@ class MainWindow(QMainWindow):
         self.table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.table.setSortingEnabled(True)
         self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
-        self.table.setAlternatingRowColors(True)
+        self.table.setAlternatingRowColors(False)
+        self.table.setStyleSheet(
+            "QTableView::item { background: white; }"
+            "QTableView::item:selected { background: white; color: black; border: none; }"
+            "QTableView::item:focus { border: none; }"
+        )
         self.table.verticalHeader().hide()
         header = self.table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        for col, width in ((0, 50), (2, 110), (3, 110), (4, 95)):
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        for col, width in ((0, 50), (1, 120), (3, 110), (4, 110), (5, 95)):
             self.table.setColumnWidth(col, width)
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
@@ -149,7 +160,33 @@ class MainWindow(QMainWindow):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(6, 6, 0, 6)
         left_layout.addWidget(self.filter)
+        self.sort_by = QComboBox()
+        self.sort_by.addItems(ActivityTableModel.COLUMNS)
+        self.sort_by.setToolTip("Choose the column used to sort activities")
+        self.sort_by.currentIndexChanged.connect(self._sort_table)
+        self.sort_direction = QPushButton("Ascending")
+        self.sort_direction.setCheckable(True)
+        self.sort_direction.setToolTip("Toggle ascending or descending sort order")
+        self.sort_direction.clicked.connect(self._toggle_sort_direction)
+        sort_layout = QHBoxLayout()
+        sort_layout.addWidget(QLabel("Sort by:"))
+        sort_layout.addWidget(self.sort_by, 1)
+        sort_layout.addWidget(self.sort_direction)
+        left_layout.addLayout(sort_layout)
         left_layout.addWidget(self.table)
+
+        self.group_totals = QTableWidget()
+        self.group_totals.setColumnCount(2)
+        self.group_totals.setHorizontalHeaderLabels(["Group", "Total time (weeks)"])
+        self.group_totals.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.group_totals.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.group_totals.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.group_totals.verticalHeader().hide()
+        totals_header = self.group_totals.horizontalHeader()
+        totals_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        totals_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self.group_totals.setFixedHeight(150)
+        left_layout.addWidget(self.group_totals)
 
         self.editor = ActivityEditor()
         self.editor.saveRequested.connect(self.save_current_activity)
@@ -359,6 +396,14 @@ class MainWindow(QMainWindow):
 
     # ---------------------------------------------------------- activities
 
+    def _sort_table(self) -> None:
+        order = Qt.SortOrder.DescendingOrder if self.sort_direction.isChecked() else Qt.SortOrder.AscendingOrder
+        self.table.sortByColumn(self.sort_by.currentIndex(), order)
+
+    def _toggle_sort_direction(self) -> None:
+        self.sort_direction.setText("Descending" if self.sort_direction.isChecked() else "Ascending")
+        self._sort_table()
+
     def _refresh(self, select_id: int | None) -> None:
         """Reload the list from the store and select `select_id` (if given)."""
         self._restoring_selection = True
@@ -400,9 +445,25 @@ class MainWindow(QMainWindow):
         self._update_title()
 
     def _update_status(self) -> None:
-        total = sum(a.effort_hours for a in self.model.activities)
+        total = sum(a.duration_weeks for a in self.model.activities)
         n = len(self.model.activities)
-        self.summary_label.setText(f"{n} activit{'y' if n == 1 else 'ies'} · {total:,.1f} h total effort")
+        self.summary_label.setText(f"{n} activit{'y' if n == 1 else 'ies'} · {total:,.0f} weeks total duration")
+
+        group_totals: dict[str, float] = {}
+        for activity in self.model.activities:
+            group_totals[activity.group_name] = group_totals.get(activity.group_name, 0) + activity.duration_weeks
+        rows = sorted(group_totals.items(), key=lambda item: item[0].casefold())
+        self.group_totals.setRowCount(len(rows) + 1)
+        for row, (group, duration) in enumerate(rows):
+            self.group_totals.setItem(row, 0, QTableWidgetItem(group or "(Ungrouped)"))
+            duration_item = QTableWidgetItem(f"{duration:,.0f}")
+            duration_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+            self.group_totals.setItem(row, 1, duration_item)
+        total_row = len(rows)
+        self.group_totals.setItem(total_row, 0, QTableWidgetItem("Project total"))
+        total_item = QTableWidgetItem(f"{total:,.0f}")
+        total_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+        self.group_totals.setItem(total_row, 1, total_item)
 
     def _current_table_id(self) -> int | None:
         index = self.table.currentIndex()

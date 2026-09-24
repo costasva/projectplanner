@@ -3,6 +3,7 @@ import sqlite3
 import pytest
 
 from projectplanner.store import (
+    APPLICATION_ID,
     Activity,
     DependencyError,
     NotAProjectFileError,
@@ -28,16 +29,18 @@ def test_ids_are_unique_and_never_reused(store):
 
 def test_update_round_trip(store):
     a = store.create(Activity(title="Design"))
-    b = store.create(Activity(title="Build", effort_hours=12.5))
+    b = store.create(Activity(title="Build", duration_weeks=12.5))
     b.description_html = "<p><b>Do</b> it</p>"
     b.description_text = "Do it"
     b.depends_on = [a.id]
     b.status = "In progress"
+    b.group_name = "Development"
     store.update(b)
     got = store.get(b.id)
     assert got.depends_on == [a.id]
-    assert got.effort_hours == 12.5
+    assert got.duration_weeks == 12.5
     assert got.description_text == "Do it"
+    assert got.group_name == "Development"
     assert store.dependents_of(a.id) == [b.id]
 
 
@@ -70,7 +73,7 @@ def test_parse_dependency_ids():
 
 
 def test_save_as_and_reopen(store, tmp_path):
-    a = store.create(Activity(title="A", effort_hours=2))
+    a = store.create(Activity(title="A", duration_weeks=2))
     path = tmp_path / "plan.pplan"
     store.save_as(path)
     store.create(Activity(title="B", depends_on=[a.id]))  # written to the file now
@@ -93,3 +96,44 @@ def test_refuses_foreign_files(tmp_path):
     conn.close()
     with pytest.raises(NotAProjectFileError):
         ProjectStore(other)
+
+
+def test_opening_legacy_project_adds_empty_group_column(tmp_path):
+    path = tmp_path / "legacy.pplan"
+    conn = sqlite3.connect(path)
+    conn.executescript(
+        f"""
+        PRAGMA application_id = {APPLICATION_ID};
+        CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);
+        INSERT INTO meta VALUES ('schema_version', '1');
+        CREATE TABLE activities (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL DEFAULT '',
+            description_html TEXT NOT NULL DEFAULT '',
+            description_text TEXT NOT NULL DEFAULT '',
+            effort_hours REAL NOT NULL DEFAULT 0,
+            status TEXT NOT NULL DEFAULT 'Not started',
+            owner TEXT NOT NULL DEFAULT '',
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        );
+        INSERT INTO activities (title, effort_hours, created_at, updated_at)
+        VALUES ('Existing activity', 80, '2026-01-01T00:00:00', '2026-01-01T00:00:00');
+        """
+    )
+    conn.close()
+
+    store = ProjectStore(path)
+    assert store.get(1).group_name == ""
+    assert store.get(1).duration_weeks == 2
+    assert store.conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == "3"
+    store.close()
+
+    conn = sqlite3.connect(path)
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(activities)")}
+    assert "group_name" in columns
+    assert "duration_weeks" in columns
+    assert "effort_hours" not in columns
+    assert conn.execute("SELECT group_name FROM activities WHERE id = 1").fetchone()[0] == ""
+    assert conn.execute("SELECT duration_weeks FROM activities WHERE id = 1").fetchone()[0] == 2
+    conn.close()

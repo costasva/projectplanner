@@ -13,6 +13,7 @@ from PyQt6.QtCore import QCoreApplication, QSettings  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from projectplanner.main_window import MainWindow  # noqa: E402
+from projectplanner.store import Activity  # noqa: E402
 
 
 @pytest.fixture(scope="module")
@@ -32,7 +33,8 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     first = w.editor.activity_id
     w.editor.title.setText("Design")
     w.editor.title.textEdited.emit("Design")
-    w.editor.effort.setValue(8)
+    w.editor.duration.setValue(8)
+    w.editor.group.setText("Planning")
     w.editor.scope.edit.setHtml("<p><b>Bold</b> scope</p>")
     assert w.editor.is_dirty()
     assert w.save_current_activity()
@@ -41,15 +43,21 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     second = w.editor.activity_id
     w.editor.depends.setText(str(first))
     w.editor.depends.textEdited.emit(str(first))
-    w.editor.effort.setValue(4)
+    w.editor.duration.setValue(4)
     assert w.save_current_activity()
 
     assert w.proxy.rowCount() == 2
-    total_col = w.model.COLUMNS.index("Total Effort (h)")
+    total_col = w.model.COLUMNS.index("Duration (weeks)")
     row = [a.id for a in w.model.activities].index(second)
-    assert w.model.index(row, total_col).data() == "4.0"  # own hours only
+    assert w.model.index(row, total_col).data() == "4"  # own duration only
     assert "font-weight" in w.store.get(first).description_html
     assert w.store.get(first).description_text == "Bold scope"
+    assert w.store.get(first).group_name == "Planning"
+    totals = {
+        w.group_totals.item(row, 0).text(): w.group_totals.item(row, 1).text()
+        for row in range(w.group_totals.rowCount())
+    }
+    assert totals == {"(Ungrouped)": "4", "Planning": "8", "Project total": "12"}
 
     # Selecting a row shows its details.
     w._select_id(first)
@@ -59,4 +67,30 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     w.delete_activity(first)
     assert w.store.get(first) is None
     assert w.store.get(second).depends_on == []
+    w.close()
+
+
+def test_editor_uses_tight_paragraphs_and_plain_table_rows(app, tmp_path):
+    w = MainWindow(tmp_path / "p.pplan")
+
+    assert "margin-top: 0" in w.editor.scope.edit.document().defaultStyleSheet()
+    assert "margin-bottom: 0" in w.editor.scope.edit.document().defaultStyleSheet()
+    assert w.editor.duration.decimals() == 0
+    assert not w.table.alternatingRowColors()
+    assert "QTableView::item:selected" in w.table.styleSheet()
+
+    w.close()
+
+
+def test_sort_controls_sort_by_group(app, tmp_path):
+    w = MainWindow(tmp_path / "p.pplan")
+    first = w.store.create(Activity(title="Planning", group_name="Planning"))
+    second = w.store.create(Activity(title="Build", group_name="Delivery"))
+    w._refresh(select_id=None)
+
+    w.sort_by.setCurrentIndex(w.model.COLUMNS.index("Group"))
+    assert w.proxy.index(0, 0).data() == str(second.id)
+
+    w.sort_direction.click()
+    assert w.proxy.index(0, 0).data() == str(first.id)
     w.close()

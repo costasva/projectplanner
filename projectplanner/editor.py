@@ -43,6 +43,9 @@ class RichTextEditor(QWidget):
         super().__init__(parent)
         self.edit = QTextEdit()
         self.edit.setAcceptRichText(True)
+        self.edit.document().setDefaultStyleSheet(
+            "p { margin-top: 0; margin-bottom: 0; }"
+        )
         self.edit.setPlaceholderText("Describe the scope of work for this activity…")
         self.edit.textChanged.connect(self.textChanged)
 
@@ -265,18 +268,21 @@ class ActivityEditor(QWidget):
         self.title = QLineEdit()
         self.title.setPlaceholderText("Short title")
 
-        self.effort = QDoubleSpinBox()
-        self.effort.setRange(0, 1_000_000)
-        self.effort.setDecimals(1)
-        self.effort.setSingleStep(1)
-        self.effort.setSuffix(" h")
-        self.effort.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.duration = QDoubleSpinBox()
+        self.duration.setRange(0, 1_000_000)
+        self.duration.setDecimals(0)
+        self.duration.setSingleStep(1)
+        self.duration.setSuffix(" weeks")
+        self.duration.setAlignment(Qt.AlignmentFlag.AlignRight)
 
         self.status = QComboBox()
         self.status.addItems(STATUSES)
 
         self.owner = QLineEdit()
         self.owner.setPlaceholderText("Who does the work (optional)")
+
+        self.group = QLineEdit()
+        self.group.setPlaceholderText("Activity group (optional)")
 
         self.depends = QLineEdit()
         self.depends.setPlaceholderText("IDs of prerequisite activities, e.g. 3, 7, 12")
@@ -289,19 +295,20 @@ class ActivityEditor(QWidget):
         self.timestamps = QLabel()
         self.timestamps.setStyleSheet("color: gray;")
 
-        effort_row = QHBoxLayout()
-        effort_row.addWidget(self.effort)
-        effort_row.addSpacing(16)
-        effort_row.addWidget(QLabel("Status:"))
-        effort_row.addWidget(self.status)
-        effort_row.addStretch(1)
+        duration_row = QHBoxLayout()
+        duration_row.addWidget(self.duration)
+        duration_row.addSpacing(16)
+        duration_row.addWidget(QLabel("Status:"))
+        duration_row.addWidget(self.status)
+        duration_row.addStretch(1)
 
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.addRow("ID:", self.id_label)
         form.addRow("Title:", self.title)
-        form.addRow("Total effort:", effort_row)
+        form.addRow("Duration:", duration_row)
         form.addRow("Owner:", self.owner)
+        form.addRow("Group:", self.group)
         form.addRow("Depends on:", self.depends)
         form.addRow("", self.depends_hint)
         form.addRow("Required by:", self.required_by)
@@ -326,9 +333,10 @@ class ActivityEditor(QWidget):
         layout.addLayout(buttons)
 
         self.title.textEdited.connect(self._mark_dirty)
-        self.effort.valueChanged.connect(self._mark_dirty)
+        self.duration.valueChanged.connect(self._mark_dirty)
         self.status.currentIndexChanged.connect(self._mark_dirty)
         self.owner.textEdited.connect(self._mark_dirty)
+        self.group.textEdited.connect(self._mark_dirty)
         self.depends.textEdited.connect(self._mark_dirty)
         self.depends.textChanged.connect(self._update_dependency_hint)
         self.scope.textChanged.connect(self._mark_dirty)
@@ -366,15 +374,16 @@ class ActivityEditor(QWidget):
         try:
             self._activity = activity
             enabled = activity is not None
-            for w in (self.title, self.effort, self.status, self.owner, self.depends, self.scope):
+            for w in (self.title, self.duration, self.status, self.owner, self.group, self.depends, self.scope):
                 w.setEnabled(enabled)
             a = activity or Activity()
             self.id_label.setText(str(a.id) if a.id is not None else "—")
             self.title.setText(a.title)
-            self.effort.setValue(a.effort_hours)
+            self.duration.setValue(a.duration_weeks)
             idx = self.status.findText(a.status)
             self.status.setCurrentIndex(idx if idx >= 0 else 0)
             self.owner.setText(a.owner)
+            self.group.setText(a.group_name)
             self.depends.setText(format_dependency_ids(a.depends_on))
             self.scope.set_html(a.description_html)
             if activity is None:
@@ -398,9 +407,10 @@ class ActivityEditor(QWidget):
             title=self.title.text().strip(),
             description_html=self.scope.html() if self.scope.plain_text().strip() else "",
             description_text=self.scope.plain_text(),
-            effort_hours=self.effort.value(),
+            duration_weeks=self.duration.value(),
             status=self.status.currentText(),
             owner=self.owner.text().strip(),
+            group_name=self.group.text().strip(),
             depends_on=parse_dependency_ids(self.depends.text()),
             created_at=self._activity.created_at,
             updated_at=self._activity.updated_at,

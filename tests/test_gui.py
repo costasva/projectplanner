@@ -36,6 +36,7 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     w.editor.duration.setValue(8)
     w.editor.group.setText("Planning")
     w.editor.scope.edit.setHtml("<p><b>Bold</b> scope</p>")
+    w.editor.risks.edit.setHtml("<p>Supplier delay</p>")
     assert w.editor.is_dirty()
     assert w.save_current_activity()
 
@@ -52,12 +53,16 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     assert w.model.index(row, total_col).data() == "4"  # own duration only
     assert "font-weight" in w.store.get(first).description_html
     assert w.store.get(first).description_text == "Bold scope"
+    assert w.store.get(first).risks_text == "Supplier delay"
     assert w.store.get(first).group_name == "Planning"
     totals = {
         w.group_totals.item(row, 0).text(): w.group_totals.item(row, 1).text()
         for row in range(w.group_totals.rowCount())
     }
     assert totals == {"(Ungrouped)": "4", "Planning": "8", "Project total": "12"}
+    w.project_notes.edit.setHtml("<p>Confirm project sponsor</p>")
+    assert w.store.project_notes()[1] == "Confirm project sponsor"
+    assert [w.tabs.tabText(i) for i in range(w.tabs.count())] == ["Activities", "Project Notes"]
 
     # Selecting a row shows its details.
     w._select_id(first)
@@ -76,6 +81,7 @@ def test_editor_uses_tight_paragraphs_and_plain_table_rows(app, tmp_path):
     assert "margin-top: 0" in w.editor.scope.edit.document().defaultStyleSheet()
     assert "margin-bottom: 0" in w.editor.scope.edit.document().defaultStyleSheet()
     assert w.editor.duration.decimals() == 0
+    assert w.editor.risks.height() < w.editor.scope.height()
     assert not w.table.alternatingRowColors()
     assert "QTableView::item:selected" in w.table.styleSheet()
 

@@ -314,6 +314,9 @@ class ActivityEditor(QWidget):
         form.addRow("Required by:", self.required_by)
 
         self.scope = RichTextEditor()
+        self.risks = RichTextEditor()
+        self.risks.edit.setPlaceholderText("Describe risks for this activity…")
+        self.risks.setFixedHeight(180)
 
         self.save_button = QPushButton("Save Activity")
         self.save_button.setDefault(True)
@@ -330,6 +333,8 @@ class ActivityEditor(QWidget):
         layout.addLayout(form)
         layout.addWidget(QLabel("Scope of work:"))
         layout.addWidget(self.scope, 1)
+        layout.addWidget(QLabel("Risks:"))
+        layout.addWidget(self.risks)
         layout.addLayout(buttons)
 
         self.title.textEdited.connect(self._mark_dirty)
@@ -340,6 +345,7 @@ class ActivityEditor(QWidget):
         self.depends.textEdited.connect(self._mark_dirty)
         self.depends.textChanged.connect(self._update_dependency_hint)
         self.scope.textChanged.connect(self._mark_dirty)
+        self.risks.textChanged.connect(self._mark_dirty)
 
         self.load(None)
 
@@ -374,7 +380,7 @@ class ActivityEditor(QWidget):
         try:
             self._activity = activity
             enabled = activity is not None
-            for w in (self.title, self.duration, self.status, self.owner, self.group, self.depends, self.scope):
+            for w in (self.title, self.duration, self.status, self.owner, self.group, self.depends, self.scope, self.risks):
                 w.setEnabled(enabled)
             a = activity or Activity()
             self.id_label.setText(str(a.id) if a.id is not None else "—")
@@ -386,6 +392,7 @@ class ActivityEditor(QWidget):
             self.group.setText(a.group_name)
             self.depends.setText(format_dependency_ids(a.depends_on))
             self.scope.set_html(a.description_html)
+            self.risks.set_html(a.risks_html)
             if activity is None:
                 self.timestamps.setText("Select an activity, or create one with Activity ▸ New.")
                 self.required_by.setText("—")
@@ -407,6 +414,8 @@ class ActivityEditor(QWidget):
             title=self.title.text().strip(),
             description_html=self.scope.html() if self.scope.plain_text().strip() else "",
             description_text=self.scope.plain_text(),
+            risks_html=self.risks.html() if self.risks.plain_text().strip() else "",
+            risks_text=self.risks.plain_text(),
             duration_weeks=self.duration.value(),
             status=self.status.currentText(),
             owner=self.owner.text().strip(),

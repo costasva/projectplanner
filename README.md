@@ -18,6 +18,8 @@ uv run python -m projectplanner plan.pplan # or open or create a specific file
 - **Depends on** takes activity IDs such as `3, 7, 12`. Unknown IDs, an
   activity depending on itself, and dependency cycles are rejected.
 - **Duration** is the number of weeks needed to complete that activity alone.
+- **Risks** records activity-specific risks; **Project Notes** holds rich-text notes
+  for the entire project.
 - Right-click a row to delete it, or press Delete. Links from activities that
   depended on the deleted one are removed.
 - **File ▸ Export to Excel** (⌘E) writes every activity to an `.xlsx` file.

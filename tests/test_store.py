@@ -32,6 +32,8 @@ def test_update_round_trip(store):
     b = store.create(Activity(title="Build", duration_weeks=12.5))
     b.description_html = "<p><b>Do</b> it</p>"
     b.description_text = "Do it"
+    b.risks_html = "<p>Late supplier</p>"
+    b.risks_text = "Late supplier"
     b.depends_on = [a.id]
     b.status = "In progress"
     b.group_name = "Development"
@@ -40,8 +42,11 @@ def test_update_round_trip(store):
     assert got.depends_on == [a.id]
     assert got.duration_weeks == 12.5
     assert got.description_text == "Do it"
+    assert got.risks_text == "Late supplier"
     assert got.group_name == "Development"
     assert store.dependents_of(a.id) == [b.id]
+    store.set_project_notes("<p>Keep scope small</p>", "Keep scope small")
+    assert store.project_notes() == ("<p>Keep scope small</p>", "Keep scope small")
 
 
 def test_rejects_unknown_self_and_cyclic_dependencies(store):
@@ -126,7 +131,10 @@ def test_opening_legacy_project_adds_empty_group_column(tmp_path):
     store = ProjectStore(path)
     assert store.get(1).group_name == ""
     assert store.get(1).duration_weeks == 2
-    assert store.conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == "3"
+    assert store.get(1).risks_html == ""
+    assert store.get(1).risks_text == ""
+    assert store.project_notes() == ("", "")
+    assert store.conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == "4"
     store.close()
 
     conn = sqlite3.connect(path)
@@ -134,6 +142,8 @@ def test_opening_legacy_project_adds_empty_group_column(tmp_path):
     assert "group_name" in columns
     assert "duration_weeks" in columns
     assert "effort_hours" not in columns
+    assert "risks_html" in columns
+    assert "risks_text" in columns
     assert conn.execute("SELECT group_name FROM activities WHERE id = 1").fetchone()[0] == ""
     assert conn.execute("SELECT duration_weeks FROM activities WHERE id = 1").fetchone()[0] == 2
     conn.close()

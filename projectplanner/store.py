@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Stamped into the SQLite header so we can tell our files from other databases.
 APPLICATION_ID = 0x50504C4E  # "PPLN"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 FILE_SUFFIX = ".pplan"
 HOURS_PER_WEEK = 40
 
@@ -30,6 +30,8 @@ CREATE TABLE IF NOT EXISTS activities (
     title            TEXT    NOT NULL DEFAULT '',
     description_html TEXT    NOT NULL DEFAULT '',
     description_text TEXT    NOT NULL DEFAULT '',
+    risks_html       TEXT    NOT NULL DEFAULT '',
+    risks_text       TEXT    NOT NULL DEFAULT '',
     duration_weeks   REAL    NOT NULL DEFAULT 0,
     status           TEXT    NOT NULL DEFAULT 'Not started',
     owner            TEXT    NOT NULL DEFAULT '',
@@ -61,6 +63,8 @@ class Activity:
     title: str = ""
     description_html: str = ""
     description_text: str = ""
+    risks_html: str = ""
+    risks_text: str = ""
     duration_weeks: float = 0.0
     status: str = STATUSES[0]
     owner: str = ""
@@ -160,6 +164,10 @@ class ProjectStore:
                     )
             if "effort_hours" in columns:
                 self.conn.execute("ALTER TABLE activities DROP COLUMN effort_hours")
+            if "risks_html" not in columns:
+                self.conn.execute("ALTER TABLE activities ADD COLUMN risks_html TEXT NOT NULL DEFAULT ''")
+            if "risks_text" not in columns:
+                self.conn.execute("ALTER TABLE activities ADD COLUMN risks_text TEXT NOT NULL DEFAULT ''")
             self.conn.execute(f"PRAGMA application_id = {APPLICATION_ID}")
             self.conn.execute(
                 "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
@@ -195,6 +203,8 @@ class ProjectStore:
             title=row["title"],
             description_html=row["description_html"],
             description_text=row["description_text"],
+            risks_html=row["risks_html"],
+            risks_text=row["risks_text"],
             duration_weeks=row["duration_weeks"],
             status=row["status"],
             owner=row["owner"],
@@ -249,6 +259,22 @@ class ProjectStore:
     def count(self) -> int:
         return self.conn.execute("SELECT count(*) FROM activities").fetchone()[0]
 
+    def project_notes(self) -> tuple[str, str]:
+        rows = dict(
+            self.conn.execute(
+                "SELECT key, value FROM meta WHERE key IN ('project_notes_html', 'project_notes_text')"
+            )
+        )
+        return rows.get("project_notes_html", ""), rows.get("project_notes_text", "")
+
+    def set_project_notes(self, html: str, text: str) -> None:
+        with self.conn:
+            self.conn.executemany(
+                "INSERT INTO meta(key, value) VALUES (?, ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                [("project_notes_html", html), ("project_notes_text", text)],
+            )
+
     # ----------------------------------------------------------- mutations
 
     def validate_dependencies(self, activity_id: int | None, dep_ids: list[int]) -> None:
@@ -275,13 +301,15 @@ class ProjectStore:
         now = _now()
         with self.conn:
             cur = self.conn.execute(
-                "INSERT INTO activities (title, description_html, description_text, "
+                "INSERT INTO activities (title, description_html, description_text, risks_html, risks_text, "
                 "duration_weeks, status, owner, group_name, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     activity.title,
                     activity.description_html,
                     activity.description_text,
+                    activity.risks_html,
+                    activity.risks_text,
                     activity.duration_weeks,
                     activity.status,
                     activity.owner,
@@ -303,13 +331,15 @@ class ProjectStore:
         self.validate_dependencies(activity.id, activity.depends_on)
         with self.conn:
             self.conn.execute(
-                "UPDATE activities SET title = ?, description_html = ?, "
-                "description_text = ?, duration_weeks = ?, status = ?, owner = ?, group_name = ?, "
+                "UPDATE activities SET title = ?, description_html = ?, description_text = ?, "
+                "risks_html = ?, risks_text = ?, duration_weeks = ?, status = ?, owner = ?, group_name = ?, "
                 "updated_at = ? WHERE id = ?",
                 (
                     activity.title,
                     activity.description_html,
                     activity.description_text,
+                    activity.risks_html,
+                    activity.risks_text,
                     activity.duration_weeks,
                     activity.status,
                     activity.owner,

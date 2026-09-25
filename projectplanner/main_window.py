@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSplitter,
+    QTabWidget,
     QTableView,
     QTableWidget,
     QTableWidgetItem,
@@ -33,7 +34,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .editor import ActivityEditor
+from .editor import ActivityEditor, RichTextEditor
 from .excel import export_activities
 from .store import (
     FILE_SUFFIX,
@@ -116,6 +117,7 @@ class MainWindow(QMainWindow):
         self.store: ProjectStore | None = None
         self._restoring_selection = False
         self._untitled_changed = False
+        self._loading_project_notes = False
 
         self.model = ActivityTableModel(self)
         self.proxy = QSortFilterProxyModel(self)
@@ -198,7 +200,24 @@ class MainWindow(QMainWindow):
         self.splitter.addWidget(self.editor)
         self.splitter.setStretchFactor(0, 1)
         self.splitter.setStretchFactor(1, 1)
-        self.setCentralWidget(self.splitter)
+
+        activities_page = QWidget()
+        activities_layout = QVBoxLayout(activities_page)
+        activities_layout.setContentsMargins(0, 0, 0, 0)
+        activities_layout.addWidget(self.splitter)
+
+        self.project_notes = RichTextEditor()
+        self.project_notes.edit.setPlaceholderText("Add notes for the whole project…")
+        self.project_notes.textChanged.connect(self._save_project_notes)
+        notes_page = QWidget()
+        notes_layout = QVBoxLayout(notes_page)
+        notes_layout.addWidget(QLabel("Project notes:"))
+        notes_layout.addWidget(self.project_notes)
+
+        self.tabs = QTabWidget()
+        self.tabs.addTab(activities_page, "Activities")
+        self.tabs.addTab(notes_page, "Project Notes")
+        self.setCentralWidget(self.tabs)
 
         self._build_actions()
         self.resize(1300, 800)
@@ -277,10 +296,25 @@ class MainWindow(QMainWindow):
         self._untitled_changed = False
         if store.path:
             self.settings.setValue("lastFile", str(store.path))
+        self._loading_project_notes = True
+        try:
+            notes_html, _notes_text = store.project_notes()
+            self.project_notes.set_html(notes_html)
+        finally:
+            self._loading_project_notes = False
         self.filter.clear()
         self._refresh(select_id=None)
         if self.model.activities:
             self._select_id(self.model.activities[0].id)
+        self._update_title()
+
+    def _save_project_notes(self) -> None:
+        if self._loading_project_notes or self.store is None:
+            return
+        text = self.project_notes.plain_text()
+        self.store.set_project_notes(self.project_notes.html() if text.strip() else "", text)
+        if self.store.is_untitled:
+            self._untitled_changed = True
         self._update_title()
 
     def _open_path(self, path: Path, quiet: bool = False) -> bool:

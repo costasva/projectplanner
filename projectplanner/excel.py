@@ -20,6 +20,7 @@ COLUMNS = [
     ("Status", 13),
     ("Owner", 16),
     ("Scope", 80),
+    ("Risks", 50),
     ("Created", 20),
     ("Updated", 20),
 ]
@@ -58,6 +59,7 @@ def export_activities(store: ProjectStore, path: str | Path) -> int:
             a.status,
             a.owner,
             a.description_text.strip(),
+            a.risks_text.strip(),
             a.created_at.replace("T", " "),
             a.updated_at.replace("T", " "),
         ]

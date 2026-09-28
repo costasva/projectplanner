@@ -14,7 +14,7 @@ from PyQt6.QtCore import (
     Qt,
     QUrl,
 )
-from PyQt6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QShortcut
+from PyQt6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QColor, QShortcut
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -45,6 +45,7 @@ from .store import (
     DependencyError,
     ProjectStore,
     format_dependency_ids,
+    parse_dependency_ids,
 )
 
 APP_NAME = "Project Planner"
@@ -61,11 +62,30 @@ class ActivityTableModel(QAbstractTableModel):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.activities: list[Activity] = []
+        self._selected_activity_id: int | None = None
+        self._dependency_ids: set[int] = set()
+        self._selecting_dependencies = False
 
     def set_activities(self, activities: list[Activity]) -> None:
         self.beginResetModel()
         self.activities = activities
         self.endResetModel()
+
+    def set_dependency_highlight(self, activity_id: int | None, dependency_ids: set[int]) -> None:
+        self._selected_activity_id = activity_id
+        self._dependency_ids = dependency_ids
+        self._emit_style_change()
+
+    def set_dependency_selection_mode(self, selecting: bool) -> None:
+        self._selecting_dependencies = selecting
+        self._emit_style_change()
+
+    def _emit_style_change(self) -> None:
+        if self.activities:
+            self.dataChanged.emit(
+                self.index(0, 0), self.index(len(self.activities) - 1, len(self.COLUMNS) - 1),
+                [Qt.ItemDataRole.ForegroundRole, Qt.ItemDataRole.BackgroundRole],
+            )
 
     def rowCount(self, parent=QModelIndex()) -> int:
         return 0 if parent.isValid() else len(self.activities)
@@ -108,8 +128,17 @@ class ActivityTableModel(QAbstractTableModel):
         if role == Qt.ItemDataRole.ToolTipRole and col == 2:
             text = a.description_text.strip()
             return text[:400] + ("…" if len(text) > 400 else "") if text else None
-        if role == Qt.ItemDataRole.ForegroundRole and col == 2 and not a.title:
-            return Qt.GlobalColor.gray
+        if role == Qt.ItemDataRole.ForegroundRole:
+            if self._selected_activity_id is not None:
+                if a.id == self._selected_activity_id or a.id in self._dependency_ids:
+                    return Qt.GlobalColor.black
+                return Qt.GlobalColor.gray
+            if col == 2 and not a.title:
+                return Qt.GlobalColor.gray
+        if role == Qt.ItemDataRole.BackgroundRole and self._selected_activity_id is not None and a.id in self._dependency_ids:
+            return QColor("#fff3cd")
+        if role == Qt.ItemDataRole.BackgroundRole and a.id == self._selected_activity_id:
+            return QColor("#d9ead3")
         return None
 
 
@@ -121,6 +150,7 @@ class MainWindow(QMainWindow):
         self._restoring_selection = False
         self._untitled_changed = False
         self._loading_project_notes = False
+        self._selecting_dependencies = False
 
         self.model = ActivityTableModel(self)
         self.proxy = QSortFilterProxyModel(self)
@@ -143,8 +173,8 @@ class MainWindow(QMainWindow):
         self.table.sortByColumn(0, Qt.SortOrder.AscendingOrder)
         self.table.setAlternatingRowColors(False)
         self.table.setStyleSheet(
-            "QTableView::item { background: white; }"
-            "QTableView::item:selected { background: white; color: black; border: none; }"
+            "QTableView { background: white; }"
+            "QTableView::item:selected { background: #d9ead3; color: black; border: none; }"
             "QTableView::item:focus { border: none; }"
         )
         self.table.verticalHeader().hide()
@@ -156,6 +186,7 @@ class MainWindow(QMainWindow):
         self.table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._show_context_menu)
         self.table.selectionModel().currentRowChanged.connect(self._on_current_row_changed)
+        self.table.clicked.connect(self._select_dependency_from_table)
         for key in (QKeySequence.StandardKey.Delete, QKeySequence(Qt.Key.Key_Backspace)):
             shortcut = QShortcut(key, self.table)
             shortcut.setContext(Qt.ShortcutContext.WidgetShortcut)
@@ -208,6 +239,8 @@ class MainWindow(QMainWindow):
         self.editor.saveRequested.connect(self.save_current_activity)
         self.editor.revertRequested.connect(self._revert_editor)
         self.editor.dirtyChanged.connect(lambda _d: self._update_title())
+        self.editor.select_dependencies_button.toggled.connect(self._set_dependency_selection_mode)
+        self.editor.depends.textChanged.connect(self._update_dependency_highlight_from_editor)
 
         self.splitter = QSplitter()
         self.splitter.addWidget(left)
@@ -504,11 +537,68 @@ class MainWindow(QMainWindow):
         activity = self.store.get(activity_id) if activity_id is not None else None
         self.editor.load(activity)
         if activity is not None:
+            self.model.set_dependency_highlight(activity.id, set(activity.depends_on))
             self.editor.set_context(
                 {a.id: a.title for a in self.model.activities},
                 self.store.dependents_of(activity.id),
             )
+        else:
+            self.model.set_dependency_highlight(None, set())
         self._update_title()
+
+    def _set_dependency_selection_mode(self, enabled: bool) -> None:
+        if enabled and self.editor.activity_id is None:
+            self.editor.select_dependencies_button.blockSignals(True)
+            self.editor.select_dependencies_button.setChecked(False)
+            self.editor.select_dependencies_button.blockSignals(False)
+            return
+        self._selecting_dependencies = enabled
+        self.model.set_dependency_selection_mode(enabled)
+        self.table.setSelectionMode(
+            QAbstractItemView.SelectionMode.NoSelection if enabled
+            else QAbstractItemView.SelectionMode.SingleSelection
+        )
+        if not enabled and self.editor.activity_id is not None:
+            self._select_id(self.editor.activity_id, show=False)
+
+    def _select_dependency_from_table(self, index: QModelIndex) -> None:
+        if not self._selecting_dependencies:
+            activity_id = index.data(ID_ROLE)
+            activity = self.store.get(activity_id) if activity_id is not None else None
+            if activity is not None:
+                self.model.set_dependency_highlight(activity.id, set(activity.depends_on))
+            return
+        if self.editor.activity_id is None:
+            return
+        activity_id = index.data(ID_ROLE)
+        if activity_id == self.editor.activity_id:
+            return
+        try:
+            dependency_ids = set(parse_dependency_ids(self.editor.depends.text()))
+        except ValueError as exc:
+            self.editor.show_dependency_error(str(exc))
+            return
+        if activity_id in dependency_ids:
+            dependency_ids.remove(activity_id)
+        else:
+            dependency_ids.add(activity_id)
+        try:
+            self.store.validate_dependencies(self.editor.activity_id, sorted(dependency_ids))
+        except DependencyError as exc:
+            self.editor.show_dependency_error(str(exc))
+            return
+        text = format_dependency_ids(list(dependency_ids))
+        self.editor.depends.setText(text)
+        self.editor.depends.textEdited.emit(text)
+
+    def _update_dependency_highlight_from_editor(self) -> None:
+        if self.editor.activity_id is None:
+            return
+        try:
+            dependency_ids = set(parse_dependency_ids(self.editor.depends.text()))
+        except ValueError:
+            dependency_ids = set()
+        self.model.set_dependency_highlight(self.editor.activity_id, dependency_ids)
 
     def _update_status(self) -> None:
         total = sum(a.duration_weeks for a in self.model.activities)
@@ -589,7 +679,7 @@ class MainWindow(QMainWindow):
         return index.data(ID_ROLE) if index.isValid() else None
 
     def _on_current_row_changed(self, current: QModelIndex, previous: QModelIndex) -> None:
-        if self._restoring_selection:
+        if self._restoring_selection or self._selecting_dependencies:
             return
         target = current.data(ID_ROLE) if current.isValid() else None
         if target == self.editor.activity_id:

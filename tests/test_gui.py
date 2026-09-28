@@ -9,7 +9,7 @@ from projectplanner.compat import unhide_qt_plugins  # noqa: E402
 
 unhide_qt_plugins()
 
-from PyQt6.QtCore import QCoreApplication, QSettings  # noqa: E402
+from PyQt6.QtCore import QCoreApplication, QSettings, Qt  # noqa: E402
 from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
 
 from projectplanner.main_window import MainWindow  # noqa: E402
@@ -78,6 +78,27 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     w._select_id(first)
     assert w.editor.title.text() == "Design"
     assert str(second) in w.editor.required_by.text()
+    assert w.model.index(0, 0).data(Qt.ItemDataRole.BackgroundRole).name() == "#d9ead3"
+    second_row = [a.id for a in w.model.activities].index(second)
+    assert w.model.index(second_row, 0).data(Qt.ItemDataRole.ForegroundRole) == Qt.GlobalColor.gray
+
+    second_index = w.proxy.index(second_row, 0)
+    w.table.setCurrentIndex(second_index)
+    assert w.editor.activity_id == second
+    first_row = [a.id for a in w.model.activities].index(first)
+    assert w.model.index(first_row, 0).data(Qt.ItemDataRole.ForegroundRole) == Qt.GlobalColor.black
+    assert w.model.index(first_row, 0).data(Qt.ItemDataRole.BackgroundRole) is not None
+    w.editor.select_dependencies_button.click()
+    assert w._selecting_dependencies
+    first_index = w.proxy.index(0, 0)
+    w.table.setCurrentIndex(first_index)
+    assert w.editor.activity_id == second
+    w.table.clicked.emit(first_index)
+    assert w.editor.depends.text() == ""
+    w.table.clicked.emit(first_index)
+    assert w.editor.depends.text() == str(first)
+    assert w.model.index(first_row, 0).data(Qt.ItemDataRole.BackgroundRole) is not None
+    w.editor.select_dependencies_button.click()
 
     w.delete_activity(first)
     assert w.store.get(first) is None

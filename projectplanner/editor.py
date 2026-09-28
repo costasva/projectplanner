@@ -300,9 +300,13 @@ class ActivityEditor(QWidget):
 
         self.depends = QLineEdit()
         self.depends.setPlaceholderText("IDs of prerequisite activities, e.g. 3, 7, 12")
+        self.select_dependencies_button = QPushButton("Select dependencies")
+        self.select_dependencies_button.setCheckable(True)
+        self.select_dependencies_button.setToolTip("Choose prerequisite activities from the activity table")
         self.depends_hint = QLabel()
         self.depends_hint.setWordWrap(True)
         self.depends_hint.setTextFormat(Qt.TextFormat.PlainText)
+        self.depends_hint.hide()
 
         self.required_by = QLabel("—")
         self.required_by.setWordWrap(True)
@@ -329,6 +333,7 @@ class ActivityEditor(QWidget):
         form.addRow("Owner:", self.owner)
         form.addRow("Group:", self.group)
         form.addRow("Depends on:", self.depends)
+        form.addRow("", self.select_dependencies_button)
         form.addRow("", self.depends_hint)
         form.addRow("Required by:", self.required_by)
 
@@ -402,8 +407,11 @@ class ActivityEditor(QWidget):
             self._activity = activity
             enabled = activity is not None
             for w in (self.title, self.duration, self.min_duration_ratio, self.max_duration_ratio,
-                      self.status, self.owner, self.group, self.depends, self.scope, self.risks):
+                      self.status, self.owner, self.group, self.depends, self.select_dependencies_button,
+                      self.scope, self.risks):
                 w.setEnabled(enabled)
+            if not enabled:
+                self.select_dependencies_button.setChecked(False)
             a = activity or Activity()
             self.id_label.setText(str(a.id) if a.id is not None else "—")
             self.title.setText(a.title)
@@ -458,6 +466,7 @@ class ActivityEditor(QWidget):
     def show_dependency_error(self, message: str) -> None:
         self.depends_hint.setText(message)
         self.depends_hint.setStyleSheet("color: #c0392b;")
+        self.depends_hint.show()
         self.depends.setFocus()
 
     # ------------------------------------------------------------- helpers
@@ -475,7 +484,13 @@ class ActivityEditor(QWidget):
         except ValueError as exc:
             self.depends_hint.setText(str(exc))
             self.depends_hint.setStyleSheet("color: #c0392b;")
+            self.depends_hint.show()
             return
         unknown = [i for i in ids if i not in self._titles]
-        self.depends_hint.setText(self._describe_ids(ids))
-        self.depends_hint.setStyleSheet("color: #c0392b;" if unknown else "color: gray;")
+        if unknown:
+            self.depends_hint.setText("No activity with ID " + ", ".join(str(i) for i in unknown))
+            self.depends_hint.setStyleSheet("color: #c0392b;")
+            self.depends_hint.show()
+        else:
+            self.depends_hint.clear()
+            self.depends_hint.hide()

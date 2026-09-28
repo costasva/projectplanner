@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Stamped into the SQLite header so we can tell our files from other databases.
 APPLICATION_ID = 0x50504C4E  # "PPLN"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 FILE_SUFFIX = ".pplan"
 HOURS_PER_WEEK = 40
 
@@ -33,6 +33,8 @@ CREATE TABLE IF NOT EXISTS activities (
     risks_html       TEXT    NOT NULL DEFAULT '',
     risks_text       TEXT    NOT NULL DEFAULT '',
     duration_weeks   REAL    NOT NULL DEFAULT 0,
+    min_duration_ratio REAL  NOT NULL DEFAULT 0.5,
+    max_duration_ratio REAL  NOT NULL DEFAULT 2.0,
     status           TEXT    NOT NULL DEFAULT 'Not started',
     owner            TEXT    NOT NULL DEFAULT '',
     group_name       TEXT    NOT NULL DEFAULT '',
@@ -66,6 +68,8 @@ class Activity:
     risks_html: str = ""
     risks_text: str = ""
     duration_weeks: float = 0.0
+    min_duration_ratio: float = 0.5
+    max_duration_ratio: float = 2.0
     status: str = STATUSES[0]
     owner: str = ""
     group_name: str = ""
@@ -168,6 +172,14 @@ class ProjectStore:
                 self.conn.execute("ALTER TABLE activities ADD COLUMN risks_html TEXT NOT NULL DEFAULT ''")
             if "risks_text" not in columns:
                 self.conn.execute("ALTER TABLE activities ADD COLUMN risks_text TEXT NOT NULL DEFAULT ''")
+            if "min_duration_ratio" not in columns:
+                self.conn.execute(
+                    "ALTER TABLE activities ADD COLUMN min_duration_ratio REAL NOT NULL DEFAULT 0.5"
+                )
+            if "max_duration_ratio" not in columns:
+                self.conn.execute(
+                    "ALTER TABLE activities ADD COLUMN max_duration_ratio REAL NOT NULL DEFAULT 2.0"
+                )
             self.conn.execute(f"PRAGMA application_id = {APPLICATION_ID}")
             self.conn.execute(
                 "INSERT INTO meta(key, value) VALUES ('schema_version', ?) "
@@ -206,6 +218,8 @@ class ProjectStore:
             risks_html=row["risks_html"],
             risks_text=row["risks_text"],
             duration_weeks=row["duration_weeks"],
+            min_duration_ratio=row["min_duration_ratio"],
+            max_duration_ratio=row["max_duration_ratio"],
             status=row["status"],
             owner=row["owner"],
             group_name=row["group_name"],
@@ -302,8 +316,8 @@ class ProjectStore:
         with self.conn:
             cur = self.conn.execute(
                 "INSERT INTO activities (title, description_html, description_text, risks_html, risks_text, "
-                "duration_weeks, status, owner, group_name, created_at, updated_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "duration_weeks, min_duration_ratio, max_duration_ratio, status, owner, group_name, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     activity.title,
                     activity.description_html,
@@ -311,6 +325,8 @@ class ProjectStore:
                     activity.risks_html,
                     activity.risks_text,
                     activity.duration_weeks,
+                    activity.min_duration_ratio,
+                    activity.max_duration_ratio,
                     activity.status,
                     activity.owner,
                     activity.group_name,
@@ -332,7 +348,8 @@ class ProjectStore:
         with self.conn:
             self.conn.execute(
                 "UPDATE activities SET title = ?, description_html = ?, description_text = ?, "
-                "risks_html = ?, risks_text = ?, duration_weeks = ?, status = ?, owner = ?, group_name = ?, "
+                "risks_html = ?, risks_text = ?, duration_weeks = ?, min_duration_ratio = ?, "
+                "max_duration_ratio = ?, status = ?, owner = ?, group_name = ?, "
                 "updated_at = ? WHERE id = ?",
                 (
                     activity.title,
@@ -341,6 +358,8 @@ class ProjectStore:
                     activity.risks_html,
                     activity.risks_text,
                     activity.duration_weeks,
+                    activity.min_duration_ratio,
+                    activity.max_duration_ratio,
                     activity.status,
                     activity.owner,
                     activity.group_name,

@@ -48,7 +48,7 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     assert w.save_current_activity()
 
     assert w.proxy.rowCount() == 2
-    total_col = w.model.COLUMNS.index("Duration (weeks)")
+    total_col = w.model.COLUMNS.index("Most likely (weeks)")
     row = [a.id for a in w.model.activities].index(second)
     assert w.model.index(row, total_col).data() == "4"  # own duration only
     assert "font-weight" in w.store.get(first).description_html
@@ -56,13 +56,23 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     assert w.store.get(first).risks_text == "Supplier delay"
     assert w.store.get(first).group_name == "Planning"
     totals = {
-        w.group_totals.item(row, 0).text(): w.group_totals.item(row, 1).text()
+        w.group_totals.item(row, 0).text(): [
+            w.group_totals.item(row, column).text() for column in range(w.group_totals.columnCount())
+        ]
         for row in range(w.group_totals.rowCount())
     }
-    assert totals == {"(Ungrouped)": "4", "Planning": "8", "Project total": "12"}
+    assert totals["Project total"] == ["Project total", "12.0", "14.0", "2.8", "10.4", "17.6"]
+    assert [w.project_duration_total.item(0, column).text() for column in range(4)] == [
+        "12.0", "14.0", "10.4", "17.6"
+    ]
+    assert w.project_duration_total.item(0, 1).font().bold()
+    w.tail_probability.setValue(20)
+    assert [w.group_totals.horizontalHeaderItem(column).text() for column in (4, 5)] == [
+        "20% limit", "80% limit"
+    ]
     w.project_notes.edit.setHtml("<p>Confirm project sponsor</p>")
     assert w.store.project_notes()[1] == "Confirm project sponsor"
-    assert [w.tabs.tabText(i) for i in range(w.tabs.count())] == ["Activities", "Project Notes"]
+    assert [w.tabs.tabText(i) for i in range(w.tabs.count())] == ["Activities", "Duration Totals", "Project Notes"]
 
     # Selecting a row shows its details.
     w._select_id(first)
@@ -81,6 +91,8 @@ def test_editor_uses_tight_paragraphs_and_plain_table_rows(app, tmp_path):
     assert "margin-top: 0" in w.editor.scope.edit.document().defaultStyleSheet()
     assert "margin-bottom: 0" in w.editor.scope.edit.document().defaultStyleSheet()
     assert w.editor.duration.decimals() == 0
+    assert w.editor.min_duration_ratio.value() == 0.5
+    assert w.editor.max_duration_ratio.value() == 2.0
     assert w.editor.risks.height() < w.editor.scope.height()
     assert not w.table.alternatingRowColors()
     assert "QTableView::item:selected" in w.table.styleSheet()

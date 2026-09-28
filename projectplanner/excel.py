@@ -16,7 +16,9 @@ COLUMNS = [
     ("Title", 36),
     ("Depends On", 14),
     ("Required By", 14),
-    ("Duration (weeks)", 18),
+    ("Most Likely (weeks)", 18),
+    ("Min Ratio", 12),
+    ("Max Ratio", 12),
     ("Status", 13),
     ("Owner", 16),
     ("Scope", 80),
@@ -56,6 +58,8 @@ def export_activities(store: ProjectStore, path: str | Path) -> int:
             format_dependency_ids(a.depends_on),
             format_dependency_ids(required_by.get(a.id, [])),
             a.duration_weeks,
+            a.min_duration_ratio,
+            a.max_duration_ratio,
             a.status,
             a.owner,
             a.description_text.strip(),
@@ -67,13 +71,15 @@ def export_activities(store: ProjectStore, path: str | Path) -> int:
             cell = ws.cell(row=row, column=col, value=value)
             cell.alignment = top_wrap
         ws.cell(row=row, column=6).number_format = "0"
+        ws.cell(row=row, column=7).number_format = "0.00"
+        ws.cell(row=row, column=8).number_format = "0.00"
 
     last = len(activities) + 1
     ws.freeze_panes = "C2"
     ws.auto_filter.ref = f"A1:{get_column_letter(len(COLUMNS))}{last}"
 
     total_row = last + 2
-    ws.cell(row=total_row, column=5, value="Project total").font = Font(bold=True)
+    ws.cell(row=total_row, column=5, value="Nominal project total").font = Font(bold=True)
     total = ws.cell(row=total_row, column=6, value=f"=SUM(F2:F{max(last, 2)})")
     total.font = Font(bold=True)
     total.number_format = "0"

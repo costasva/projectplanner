@@ -275,6 +275,20 @@ class ActivityEditor(QWidget):
         self.duration.setSuffix(" weeks")
         self.duration.setAlignment(Qt.AlignmentFlag.AlignRight)
 
+        self.min_duration_ratio = QDoubleSpinBox()
+        self.min_duration_ratio.setRange(0, 100)
+        self.min_duration_ratio.setDecimals(2)
+        self.min_duration_ratio.setSingleStep(0.1)
+        self.min_duration_ratio.setValue(0.5)
+        self.min_duration_ratio.setSuffix("x")
+
+        self.max_duration_ratio = QDoubleSpinBox()
+        self.max_duration_ratio.setRange(0, 100)
+        self.max_duration_ratio.setDecimals(2)
+        self.max_duration_ratio.setSingleStep(0.1)
+        self.max_duration_ratio.setValue(2.0)
+        self.max_duration_ratio.setSuffix("x")
+
         self.status = QComboBox()
         self.status.addItems(STATUSES)
 
@@ -297,7 +311,12 @@ class ActivityEditor(QWidget):
 
         duration_row = QHBoxLayout()
         duration_row.addWidget(self.duration)
-        duration_row.addSpacing(16)
+        duration_row.addSpacing(12)
+        duration_row.addWidget(QLabel("Min:"))
+        duration_row.addWidget(self.min_duration_ratio)
+        duration_row.addWidget(QLabel("Max:"))
+        duration_row.addWidget(self.max_duration_ratio)
+        duration_row.addSpacing(12)
         duration_row.addWidget(QLabel("Status:"))
         duration_row.addWidget(self.status)
         duration_row.addStretch(1)
@@ -306,7 +325,7 @@ class ActivityEditor(QWidget):
         form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         form.addRow("ID:", self.id_label)
         form.addRow("Title:", self.title)
-        form.addRow("Duration:", duration_row)
+        form.addRow("Most likely:", duration_row)
         form.addRow("Owner:", self.owner)
         form.addRow("Group:", self.group)
         form.addRow("Depends on:", self.depends)
@@ -339,6 +358,8 @@ class ActivityEditor(QWidget):
 
         self.title.textEdited.connect(self._mark_dirty)
         self.duration.valueChanged.connect(self._mark_dirty)
+        self.min_duration_ratio.valueChanged.connect(self._mark_dirty)
+        self.max_duration_ratio.valueChanged.connect(self._mark_dirty)
         self.status.currentIndexChanged.connect(self._mark_dirty)
         self.owner.textEdited.connect(self._mark_dirty)
         self.group.textEdited.connect(self._mark_dirty)
@@ -380,12 +401,15 @@ class ActivityEditor(QWidget):
         try:
             self._activity = activity
             enabled = activity is not None
-            for w in (self.title, self.duration, self.status, self.owner, self.group, self.depends, self.scope, self.risks):
+            for w in (self.title, self.duration, self.min_duration_ratio, self.max_duration_ratio,
+                      self.status, self.owner, self.group, self.depends, self.scope, self.risks):
                 w.setEnabled(enabled)
             a = activity or Activity()
             self.id_label.setText(str(a.id) if a.id is not None else "—")
             self.title.setText(a.title)
             self.duration.setValue(a.duration_weeks)
+            self.min_duration_ratio.setValue(a.min_duration_ratio)
+            self.max_duration_ratio.setValue(a.max_duration_ratio)
             idx = self.status.findText(a.status)
             self.status.setCurrentIndex(idx if idx >= 0 else 0)
             self.owner.setText(a.owner)
@@ -417,6 +441,8 @@ class ActivityEditor(QWidget):
             risks_html=self.risks.html() if self.risks.plain_text().strip() else "",
             risks_text=self.risks.plain_text(),
             duration_weeks=self.duration.value(),
+            min_duration_ratio=self.min_duration_ratio.value(),
+            max_duration_ratio=self.max_duration_ratio.value(),
             status=self.status.currentText(),
             owner=self.owner.text().strip(),
             group_name=self.group.text().strip(),

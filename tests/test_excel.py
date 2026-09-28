@@ -13,8 +13,8 @@ def test_export(tmp_path):
 
     ws = load_workbook(path).active
     rows = list(ws.iter_rows(min_row=1, max_row=3, values_only=True))
-    assert rows[0][:7] == ("ID", "Group", "Title", "Depends On", "Required By", "Duration (weeks)", "Status")
-    assert rows[1][:7] == (1, None, "Design", None, "2", 8, "Not started")
-    assert rows[2][:7] == (2, None, "Build", "1", None, 20, "Not started")
-    assert rows[1][8] == "Draw it"
+    assert rows[0][:9] == ("ID", "Group", "Title", "Depends On", "Required By", "Most Likely (weeks)", "Min Ratio", "Max Ratio", "Status")
+    assert rows[1][:9] == (1, None, "Design", None, "2", 8, 0.5, 2, "Not started")
+    assert rows[2][:9] == (2, None, "Build", "1", None, 20, 0.5, 2, "Not started")
+    assert rows[1][10] == "Draw it"
     assert ws["F5"].value == "=SUM(F2:F3)"

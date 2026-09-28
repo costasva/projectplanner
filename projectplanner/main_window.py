@@ -1,7 +1,9 @@
 """Main window: activity list on the left, activity details on the right."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
+from statistics import NormalDist
 
 from PyQt6.QtCore import (
     QAbstractTableModel,
@@ -16,6 +18,7 @@ from PyQt6.QtGui import QAction, QCloseEvent, QDesktopServices, QKeySequence, QS
 from PyQt6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
+    QDoubleSpinBox,
     QFileDialog,
     QHBoxLayout,
     QHeaderView,
@@ -52,7 +55,7 @@ ID_ROLE = Qt.ItemDataRole.UserRole + 1
 
 
 class ActivityTableModel(QAbstractTableModel):
-    COLUMNS = ["ID", "Group", "Title", "Depends On", "Duration (weeks)", "Status"]
+    COLUMNS = ["ID", "Group", "Title", "Depends On", "Most likely (weeks)", "Status"]
     NUMERIC = {0, 4}
 
     def __init__(self, parent=None):
@@ -177,18 +180,29 @@ class MainWindow(QMainWindow):
         left_layout.addLayout(sort_layout)
         left_layout.addWidget(self.table)
 
+        left_layout.addWidget(QLabel("Project duration:"))
+        self.project_duration_total = QTableWidget()
+        self.project_duration_total.setColumnCount(4)
+        self.project_duration_total.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.project_duration_total.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        self.project_duration_total.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.project_duration_total.verticalHeader().hide()
+        project_total_header = self.project_duration_total.horizontalHeader()
+        for column in range(self.project_duration_total.columnCount()):
+            project_total_header.setSectionResizeMode(column, QHeaderView.ResizeMode.Stretch)
+        self.project_duration_total.setFixedHeight(80)
+        left_layout.addWidget(self.project_duration_total)
+
         self.group_totals = QTableWidget()
-        self.group_totals.setColumnCount(2)
-        self.group_totals.setHorizontalHeaderLabels(["Group", "Total time (weeks)"])
+        self.group_totals.setColumnCount(6)
         self.group_totals.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.group_totals.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
         self.group_totals.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.group_totals.verticalHeader().hide()
         totals_header = self.group_totals.horizontalHeader()
         totals_header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        totals_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self.group_totals.setFixedHeight(150)
-        left_layout.addWidget(self.group_totals)
+        for column in range(1, self.group_totals.columnCount()):
+            totals_header.setSectionResizeMode(column, QHeaderView.ResizeMode.ResizeToContents)
 
         self.editor = ActivityEditor()
         self.editor.saveRequested.connect(self.save_current_activity)
@@ -206,6 +220,23 @@ class MainWindow(QMainWindow):
         activities_layout.setContentsMargins(0, 0, 0, 0)
         activities_layout.addWidget(self.splitter)
 
+        self.tail_probability = QDoubleSpinBox()
+        self.tail_probability.setRange(0.1, 49.9)
+        self.tail_probability.setDecimals(1)
+        self.tail_probability.setValue(10)
+        self.tail_probability.setSuffix("%")
+        self.tail_probability.setToolTip("Probability below the lower duration limit; the upper limit uses the complement")
+        self.tail_probability.valueChanged.connect(self._update_status)
+        duration_page = QWidget()
+        duration_layout = QVBoxLayout(duration_page)
+        interval_layout = QHBoxLayout()
+        interval_layout.addWidget(QLabel("Tail probability:"))
+        interval_layout.addWidget(self.tail_probability)
+        interval_layout.addWidget(QLabel("(10% gives 10% and 90% limits)"))
+        interval_layout.addStretch(1)
+        duration_layout.addLayout(interval_layout)
+        duration_layout.addWidget(self.group_totals)
+
         self.project_notes = RichTextEditor()
         self.project_notes.edit.setPlaceholderText("Add notes for the whole project…")
         self.project_notes.textChanged.connect(self._save_project_notes)
@@ -216,6 +247,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(activities_page, "Activities")
+        self.tabs.addTab(duration_page, "Duration Totals")
         self.tabs.addTab(notes_page, "Project Notes")
         self.setCentralWidget(self.tabs)
 
@@ -481,23 +513,76 @@ class MainWindow(QMainWindow):
     def _update_status(self) -> None:
         total = sum(a.duration_weeks for a in self.model.activities)
         n = len(self.model.activities)
-        self.summary_label.setText(f"{n} activit{'y' if n == 1 else 'ies'} · {total:,.0f} weeks total duration")
+        self.summary_label.setText(f"{n} activit{'y' if n == 1 else 'ies'} · {total:,.0f} weeks nominal duration")
 
-        group_totals: dict[str, float] = {}
+        tail_probability = self.tail_probability.value()
+        self.group_totals.setHorizontalHeaderLabels([
+            "Group", "Nominal", "Most likely (MLE)", "Std. dev.",
+            f"{tail_probability:g}% limit", f"{100 - tail_probability:g}% limit",
+        ])
+        groups: dict[str, list[Activity]] = {}
         for activity in self.model.activities:
-            group_totals[activity.group_name] = group_totals.get(activity.group_name, 0) + activity.duration_weeks
-        rows = sorted(group_totals.items(), key=lambda item: item[0].casefold())
+            groups.setdefault(activity.group_name, []).append(activity)
+        rows = sorted(groups.items(), key=lambda item: item[0].casefold())
         self.group_totals.setRowCount(len(rows) + 1)
-        for row, (group, duration) in enumerate(rows):
-            self.group_totals.setItem(row, 0, QTableWidgetItem(group or "(Ungrouped)"))
-            duration_item = QTableWidgetItem(f"{duration:,.0f}")
-            duration_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-            self.group_totals.setItem(row, 1, duration_item)
+        for row, (group, activities) in enumerate(rows):
+            self._set_duration_total_row(row, group or "(Ungrouped)", activities, tail_probability)
         total_row = len(rows)
-        self.group_totals.setItem(total_row, 0, QTableWidgetItem("Project total"))
-        total_item = QTableWidgetItem(f"{total:,.0f}")
-        total_item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
-        self.group_totals.setItem(total_row, 1, total_item)
+        self._set_duration_total_row(total_row, "Project total", self.model.activities, tail_probability)
+        self._update_project_duration_footer(tail_probability)
+
+    def _update_project_duration_footer(self, tail_probability: float) -> None:
+        nominal, mean, standard_deviation = self._duration_statistics(self.model.activities)
+        normal = NormalDist(mu=mean, sigma=standard_deviation) if standard_deviation else None
+        lower = normal.inv_cdf(tail_probability / 100) if normal else mean
+        upper = normal.inv_cdf(1 - tail_probability / 100) if normal else mean
+        self.project_duration_total.setHorizontalHeaderLabels([
+            "Nominal", "Most likely (MLE)",
+            f"{tail_probability:g}% limit", f"{100 - tail_probability:g}% limit",
+        ])
+        self.project_duration_total.setRowCount(1)
+        for column, value in enumerate((nominal, mean, lower, upper)):
+            item = QTableWidgetItem(f"{value:,.1f}")
+            item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+            if column == 1:
+                font = item.font()
+                font.setBold(True)
+                item.setFont(font)
+            self.project_duration_total.setItem(0, column, item)
+
+    def _set_duration_total_row(
+        self, row: int, label: str, activities: list[Activity], tail_probability: float,
+    ) -> None:
+        nominal, mean, standard_deviation = self._duration_statistics(activities)
+        normal = NormalDist(mu=mean, sigma=standard_deviation) if standard_deviation else None
+        lower = normal.inv_cdf(tail_probability / 100) if normal else mean
+        upper = normal.inv_cdf(1 - tail_probability / 100) if normal else mean
+        values = [label, f"{nominal:,.1f}", f"{mean:,.1f}", f"{standard_deviation:,.1f}",
+                  f"{lower:,.1f}", f"{upper:,.1f}"]
+        for column, value in enumerate(values):
+            item = QTableWidgetItem(value)
+            if column:
+                item.setTextAlignment(int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter))
+            self.group_totals.setItem(row, column, item)
+
+    @staticmethod
+    def _duration_statistics(activities: list[Activity]) -> tuple[float, float, float]:
+        nominal = sum(activity.duration_weeks for activity in activities)
+        mean = sum(
+            activity.duration_weeks * (
+                activity.min_duration_ratio + 1 + activity.max_duration_ratio
+            ) / 3
+            for activity in activities
+        )
+        variance = sum(
+            (activity.duration_weeks ** 2) * (
+                activity.min_duration_ratio ** 2 + 1 + activity.max_duration_ratio ** 2
+                - activity.min_duration_ratio - activity.max_duration_ratio
+                - activity.min_duration_ratio * activity.max_duration_ratio
+            ) / 18
+            for activity in activities
+        )
+        return nominal, mean, math.sqrt(variance)
 
     def _current_table_id(self) -> int | None:
         index = self.table.currentIndex()

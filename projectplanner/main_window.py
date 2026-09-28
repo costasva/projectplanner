@@ -38,6 +38,7 @@ from PyQt6.QtWidgets import (
 )
 
 from .editor import ActivityEditor, RichTextEditor
+from .dependency_graph import DependencyGraph
 from .excel import export_activities
 from .store import (
     FILE_SUFFIX,
@@ -253,6 +254,12 @@ class MainWindow(QMainWindow):
         activities_layout.setContentsMargins(0, 0, 0, 0)
         activities_layout.addWidget(self.splitter)
 
+        self.dependency_graph = DependencyGraph()
+        graph_page = QWidget()
+        graph_layout = QVBoxLayout(graph_page)
+        graph_layout.setContentsMargins(6, 6, 6, 6)
+        graph_layout.addWidget(self.dependency_graph)
+
         self.tail_probability = QDoubleSpinBox()
         self.tail_probability.setRange(0.1, 49.9)
         self.tail_probability.setDecimals(1)
@@ -280,6 +287,7 @@ class MainWindow(QMainWindow):
 
         self.tabs = QTabWidget()
         self.tabs.addTab(activities_page, "Activities")
+        self.tabs.addTab(graph_page, "Dependencies")
         self.tabs.addTab(duration_page, "Duration Totals")
         self.tabs.addTab(notes_page, "Project Notes")
         self.setCentralWidget(self.tabs)
@@ -515,6 +523,7 @@ class MainWindow(QMainWindow):
         elif self.editor.activity_id is not None and self.store.get(self.editor.activity_id) is None:
             self.editor.load(None)
         self._update_status()
+        self.dependency_graph.update_graph(self.model.activities, self.editor.activity_id)
 
     def _select_id(self, activity_id: int, show: bool = True) -> None:
         """Select a row (and show it in the editor) without the unsaved-changes prompt."""
@@ -544,6 +553,7 @@ class MainWindow(QMainWindow):
             )
         else:
             self.model.set_dependency_highlight(None, set())
+        self.dependency_graph.update_graph(self.model.activities, self.editor.activity_id)
         self._update_title()
 
     def _set_dependency_selection_mode(self, enabled: bool) -> None:

@@ -72,7 +72,9 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     ]
     w.project_notes.edit.setHtml("<p>Confirm project sponsor</p>")
     assert w.store.project_notes()[1] == "Confirm project sponsor"
-    assert [w.tabs.tabText(i) for i in range(w.tabs.count())] == ["Activities", "Duration Totals", "Project Notes"]
+    assert [w.tabs.tabText(i) for i in range(w.tabs.count())] == [
+        "Activities", "Dependencies", "Duration Totals", "Project Notes"
+    ]
 
     # Selecting a row shows its details.
     w._select_id(first)

@@ -40,6 +40,8 @@ from PyQt6.QtWidgets import (
 from .editor import ActivityEditor, RichTextEditor
 from .dependency_graph import DependencyGraph
 from .excel import export_activities
+from .scheduler import ScheduleError, schedule_activities
+from .schedule_view import ScheduleView
 from .store import (
     FILE_SUFFIX,
     Activity,
@@ -260,6 +262,9 @@ class MainWindow(QMainWindow):
         graph_layout.setContentsMargins(6, 6, 6, 6)
         graph_layout.addWidget(self.dependency_graph)
 
+        self.schedule_view = ScheduleView()
+        self.schedule_view.capacityChanged.connect(self._set_schedule_capacity)
+
         self.tail_probability = QDoubleSpinBox()
         self.tail_probability.setRange(0.1, 49.9)
         self.tail_probability.setDecimals(1)
@@ -288,6 +293,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(activities_page, "Activities")
         self.tabs.addTab(graph_page, "Dependencies")
+        self.tabs.addTab(self.schedule_view, "Schedule")
         self.tabs.addTab(duration_page, "Duration Totals")
         self.tabs.addTab(notes_page, "Project Notes")
         self.setCentralWidget(self.tabs)
@@ -367,6 +373,7 @@ class MainWindow(QMainWindow):
             self.store.close()
         self.store = store
         self._untitled_changed = False
+        self.schedule_view.set_available_people(store.available_people())
         if store.path:
             self.settings.setValue("lastFile", str(store.path))
         self._loading_project_notes = True
@@ -389,6 +396,25 @@ class MainWindow(QMainWindow):
         if self.store.is_untitled:
             self._untitled_changed = True
         self._update_title()
+
+    def _set_schedule_capacity(self, people: int) -> None:
+        if self.store is None:
+            return
+        self.store.set_available_people(people)
+        if self.store.is_untitled:
+            self._untitled_changed = True
+        self._update_schedule()
+        self._update_title()
+
+    def _update_schedule(self) -> None:
+        if self.store is None:
+            return
+        try:
+            schedule = schedule_activities(self.model.activities, self.store.available_people())
+        except ScheduleError as exc:
+            self.schedule_view.show_error(str(exc))
+            return
+        self.schedule_view.set_schedule(schedule)
 
     def _open_path(self, path: Path, quiet: bool = False) -> bool:
         try:
@@ -524,6 +550,7 @@ class MainWindow(QMainWindow):
             self.editor.load(None)
         self._update_status()
         self.dependency_graph.update_graph(self.model.activities, self.editor.activity_id)
+        self._update_schedule()
 
     def _select_id(self, activity_id: int, show: bool = True) -> None:
         """Select a row (and show it in the editor) without the unsaved-changes prompt."""

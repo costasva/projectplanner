@@ -51,6 +51,9 @@ def test_update_round_trip(store):
     assert store.dependents_of(a.id) == [b.id]
     store.set_project_notes("<p>Keep scope small</p>", "Keep scope small")
     assert store.project_notes() == ("<p>Keep scope small</p>", "Keep scope small")
+    assert store.available_people() == 2
+    store.set_available_people(4)
+    assert store.available_people() == 4
 
 
 def test_rejects_unknown_self_and_cyclic_dependencies(store):
@@ -140,7 +143,8 @@ def test_opening_legacy_project_adds_empty_group_column(tmp_path):
     assert store.project_notes() == ("", "")
     assert store.get(1).min_duration_ratio == 0.5
     assert store.get(1).max_duration_ratio == 2.0
-    assert store.conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == "5"
+    assert store.available_people() == 2
+    assert store.conn.execute("SELECT value FROM meta WHERE key = 'schema_version'").fetchone()[0] == "6"
     store.close()
 
     conn = sqlite3.connect(path)

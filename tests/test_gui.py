@@ -10,7 +10,7 @@ from projectplanner.compat import unhide_qt_plugins  # noqa: E402
 unhide_qt_plugins()
 
 from PyQt6.QtCore import QCoreApplication, QSettings, Qt  # noqa: E402
-from PyQt6.QtWidgets import QApplication, QMessageBox  # noqa: E402
+from PyQt6.QtWidgets import QAbstractItemView, QApplication, QMessageBox  # noqa: E402
 
 from projectplanner.main_window import MainWindow  # noqa: E402
 from projectplanner.store import Activity  # noqa: E402
@@ -73,8 +73,15 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     w.project_notes.edit.setHtml("<p>Confirm project sponsor</p>")
     assert w.store.project_notes()[1] == "Confirm project sponsor"
     assert [w.tabs.tabText(i) for i in range(w.tabs.count())] == [
-        "Activities", "Dependencies", "Duration Totals", "Project Notes"
+        "Activities", "Dependencies", "Schedule", "Duration Totals", "Project Notes"
     ]
+    assert w.schedule_view.table.rowCount() == 2
+    assert [w.schedule_view.table.item(0, column).text() for column in (3, 4, 5)] == ["8", "0", "8"]
+    assert w.schedule_view._gantt_labels.columnCount() == 2
+    assert w.schedule_view._gantt_labels.item(0, 1).text() == "Planning"
+    assert w.schedule_view._gantt.transform().m11() == 1
+    assert w.schedule_view._gantt_labels.verticalScrollMode() == QAbstractItemView.ScrollMode.ScrollPerPixel
+    assert w.schedule_view._gantt_labels.verticalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
 
     # Selecting a row shows its details.
     w._select_id(first)

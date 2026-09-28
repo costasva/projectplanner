@@ -14,7 +14,7 @@ from pathlib import Path
 
 # Stamped into the SQLite header so we can tell our files from other databases.
 APPLICATION_ID = 0x50504C4E  # "PPLN"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 FILE_SUFFIX = ".pplan"
 HOURS_PER_WEEK = 40
 
@@ -186,6 +186,9 @@ class ProjectStore:
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 (str(SCHEMA_VERSION),),
             )
+            self.conn.execute(
+                "INSERT OR IGNORE INTO meta(key, value) VALUES ('schedule_available_people', '2')"
+            )
 
     @property
     def is_untitled(self) -> bool:
@@ -287,6 +290,22 @@ class ProjectStore:
                 "INSERT INTO meta(key, value) VALUES (?, ?) "
                 "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
                 [("project_notes_html", html), ("project_notes_text", text)],
+            )
+
+    def available_people(self) -> int:
+        row = self.conn.execute(
+            "SELECT value FROM meta WHERE key = 'schedule_available_people'"
+        ).fetchone()
+        return int(row[0]) if row is not None else 2
+
+    def set_available_people(self, people: int) -> None:
+        if people < 1:
+            raise ValueError("Available people must be at least 1")
+        with self.conn:
+            self.conn.execute(
+                "INSERT INTO meta(key, value) VALUES ('schedule_available_people', ?) "
+                "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (str(people),),
             )
 
     # ----------------------------------------------------------- mutations

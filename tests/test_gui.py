@@ -100,7 +100,9 @@ def test_create_edit_delete(app, tmp_path, monkeypatch):
     w.table.clicked.emit(first_index)
     assert w.editor.depends.text() == str(first)
     assert w.model.index(first_row, 0).data(Qt.ItemDataRole.BackgroundRole) is not None
-    w.editor.select_dependencies_button.click()
+    assert w.save_current_activity()
+    assert not w.editor.select_dependencies_button.isChecked()
+    assert not w._selecting_dependencies
 
     w.delete_activity(first)
     assert w.store.get(first) is None

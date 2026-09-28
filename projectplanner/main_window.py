@@ -738,6 +738,7 @@ class MainWindow(QMainWindow):
             self.editor.show_dependency_error(str(exc))
             QMessageBox.warning(self, APP_NAME, f"Activity {self.editor.activity_id} was not saved:\n\n{exc}")
             return False
+        self.editor.select_dependencies_button.setChecked(False)
         self._mark_project_changed()
         self._refresh(select_id=activity.id)
         self.statusBar().showMessage(f"Saved activity {activity.id}", 3000)
